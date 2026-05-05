@@ -4,12 +4,12 @@ import numpy as np
 import sys
 
 
-# Number of within-cycle lagged stops to include for delay and speed.
+# Count of lag features (for random forest)
 N_LAGS = 3
 
 
+'''
 def load_weather(weather_path: str) -> pd.DataFrame:
-    """Load hourly weather CSV, return (Date str, hour int) keyed DataFrame."""
     w = pd.read_csv(weather_path, parse_dates=["time"])
     w["Date"] = w["time"].dt.strftime("%Y-%m-%d")
     w["hour"] = w["time"].dt.hour
@@ -21,17 +21,16 @@ def load_weather(weather_path: str) -> pd.DataFrame:
     })
     return w[["Date", "hour", "temperature_c", "precipitation_mm",
               "rain_mm", "windspeed_kmh"]]
+'''
 
-
+# Parse raw time which is in seconds since midnight
 def parse_scheduled_times(dates, time_strs):
-    """Vectorized parse of ScheduledArrivalTime, which has no date component
-    and may have hours >= 24 (MTA overnight notation, e.g. '24:06:14')."""
-    parts = time_strs.str.split(":", expand=True).astype(float)
-    delta = (
+    parts = time_strs.str.split(":", expand=True).astype(float) 
+    delta = ( 
         pd.to_timedelta(parts[0], unit="h")
         + pd.to_timedelta(parts[1], unit="m")
         + pd.to_timedelta(parts[2], unit="s")
-    )
+    ) 
     return pd.to_datetime(dates) + delta
 
 
@@ -53,27 +52,27 @@ def main(input_path: str, output_path: str,
         df.loc[valid_sched, "ScheduledArrivalTime"],
     )
 
-    # --- Core derived features ---
+    # Derived features (delay averages, encoded times)
 
-    # Delay in seconds: positive = late, negative = early.
+    # Raw delay in +- seconds
     df["delay_s"] = (
         df["ExpectedArrivalTime"] - df["ScheduledArrival"]
     ).dt.total_seconds()
 
-    # Fix day-boundary errors (~±24h): happens when a bus running just past
-    # midnight has a ScheduledArrivalTime from the prior service evening, or
-    # vice versa. Shift by ±86400s to minimize |delay|.
+    # Wrap around times just before or after midnight so trips
+    # across this boundary dont blow up 
     off = df["delay_s"].abs() > 12 * 3600
     df.loc[off, "delay_s"] += np.where(df.loc[off, "delay_s"] < 0, 86400, -86400)
 
-    # Speed: distance to next stop (m) / seconds until expected arrival.
+    # Speed: distance to next stop / seconds until expected arrival.
     time_to_arrival = (
         df["ExpectedArrivalTime"] - df["RecordedAtTime"]
     ).dt.total_seconds()
+
     # Zero or negative time_to_arrival (bus already at/past stop) -> NaN speed.
     df["speed"] = df["DistanceFromStop"] / time_to_arrival.where(time_to_arrival > 0)
 
-    # --- Cyclical time encodings ---
+    # Do cyclical encodings per paper, used as raw features
     hour = df["RecordedAtTime"].dt.hour + df["RecordedAtTime"].dt.minute / 60
     dow = df["RecordedAtTime"].dt.dayofweek
     df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
@@ -81,11 +80,11 @@ def main(input_path: str, output_path: str,
     df["day_sin"] = np.sin(2 * np.pi * dow / 7)
     df["day_cos"] = np.cos(2 * np.pi * dow / 7)
 
-    # Rush hour binary flag: 08:00-09:00 and 17:00-18:00.
+    # Rush hour flag, 8-9, 5-6
     h = df["RecordedAtTime"].dt.hour
     df["rush_hour"] = (((h >= 8) & (h < 9)) | ((h >= 17) & (h < 18))).astype(int)
 
-    # --- Lagged features (within each cycle) ---
+    # Do our lagged feature calculations
     # CycleNumber from sort_cycles.py is unique per (line, direction, vehicle)
     # across the month, so this group identifies a single trip.
     cycle_group = ["PublishedLineName", "DirectionRef", "VehicleRef", "CycleNumber"]
@@ -96,7 +95,7 @@ def main(input_path: str, output_path: str,
         df[f"delay_lag{n}"] = grouped_delay.shift(n)
         df[f"speed_lag{n}"] = grouped_speed.shift(n)
 
-    # --- Hourly weather join (optional) ---
+    '''
     if weather_path is not None:
         weather = load_weather(weather_path)
         df["hour"] = df["RecordedAtTime"].dt.hour
@@ -110,7 +109,9 @@ def main(input_path: str, output_path: str,
                 "rain_mm", "windspeed_kmh"]] = \
                 df[["temperature_c", "precipitation_mm",
                     "rain_mm", "windspeed_kmh"]].fillna(0)
+    '''
 
+    # Write raw data
     df.to_csv(output_path, index=False)
     print(f"Written {len(df)} rows to {output_path}")
 

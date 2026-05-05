@@ -36,8 +36,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import StandardScaler
 
-# ── constants ─────────────────────────────────────────────────────────────────
-
+# Change me for more features, see data parsing
 FEATURE_COLS = [
     "delay_s",
     "speed",
@@ -46,7 +45,7 @@ FEATURE_COLS = [
     "rush_hour",
     "DistanceFromStop",
     "DirectionRef",
-    # weather (joined at load time)
+# TODO: deprecated
     "temperature_c",
     "precipitation_mm",
     "rain_mm",
@@ -55,11 +54,10 @@ FEATURE_COLS = [
 
 CYCLE_GROUP = ["PublishedLineName", "DirectionRef", "VehicleRef", "CycleNumber"]
 
-DELAY_CLIP = 1800   # ±30 min — clip before computing delta
+DELAY_CLIP = 1800   # 30 min delay in seconds for cycle separation 
 
 
-# ── data helpers ──────────────────────────────────────────────────────────────
-
+'''
 def load_weather(path: str | None) -> pd.DataFrame | None:
     """Load hourly weather CSV keyed on (Date str, hour int)."""
     if path is None:
@@ -78,7 +76,7 @@ def load_weather(path: str | None) -> pd.DataFrame | None:
     })
     return w[["Date", "hour", "temperature_c", "precipitation_mm",
               "rain_mm", "windspeed_kmh"]]
-
+'''
 
 def temporal_split_dates(dates: np.ndarray):
     dates = np.sort(np.unique(dates))
@@ -92,17 +90,18 @@ def temporal_split_dates(dates: np.ndarray):
 
 def load_cycles(paths: list[str], max_cycles: int | None = None,
                 weather: pd.DataFrame | None = None) -> list[tuple]:
-    """Load parsed CSVs and return a list of 5-tuples per route cycle:
-      (date, X, y, stop_names, line_name)
 
-    X : float32 (L-1, k) — features at stops 0..L-2
-    y : float32 (L-1,)   — Δdelay at stops 1..L-1  (clip(delay[k+1]) - clip(delay[k]))
-    """
+    # Build tuples for cycles from parsed CSV (date, X, y, stop_names, line_name)
+    # - date: raw date
+    # - X: features for stops
+    # - y: target, delay truth
+       
     weather_cols = ["temperature_c", "precipitation_mm", "rain_mm", "windspeed_kmh"]
     needed = list(set(
         FEATURE_COLS + CYCLE_GROUP
         + ["Date", "RecordedAtTime", "NextStopPointName"]
     ))
+
     # Weather cols not yet in CSV; remove so read_csv doesn't error.
     needed = [c for c in needed if c not in weather_cols]
 
@@ -147,7 +146,7 @@ def load_cycles(paths: list[str], max_cycles: int | None = None,
         stop_names = grp["NextStopPointName"].values                # (L,)
         line_name  = keys[0]                                        # PublishedLineName
 
-        # Δdelay target: change in clipped delay from one stop to the next.
+        # Delay target
         clipped = np.clip(delay, -DELAY_CLIP, DELAY_CLIP)
         target  = clipped[1:] - clipped[:-1]
 
@@ -164,6 +163,7 @@ def load_cycles(paths: list[str], max_cycles: int | None = None,
     return cycles
 
 
+# Do train/test/val splits, 2/3 for train, rest is test/val
 def split_cycles(cycles: list[tuple]):
     all_dates = np.array([c[0] for c in cycles])
     train_d, val_d, test_d = temporal_split_dates(all_dates)
@@ -173,8 +173,8 @@ def split_cycles(cycles: list[tuple]):
     return train, val, test
 
 
+# Derived feature for average line latency
 def compute_stop_line_means(train_cycles: list[tuple]):
-    """Mean Δdelay per stop name and per line from training cycles."""
     stop_sum = defaultdict(float)
     stop_cnt = defaultdict(int)
     line_sum = defaultdict(float)
@@ -195,8 +195,8 @@ def compute_stop_line_means(train_cycles: list[tuple]):
 
 def add_encoded_features(cycles: list[tuple], stop_means: dict,
                          line_means: dict, global_mean: float) -> list[tuple]:
-    """Append stop_mean_delay, line_mean_delay, stop_idx_norm.
-    Converts 5-tuples to 3-tuples."""
+
+    # Rebuild our tuples with our derived features
     new_cycles = []
     for date, feats, targets, stop_names, line_name in cycles:
         L = len(feats)
@@ -222,7 +222,7 @@ def apply_scaler(cycles: list[tuple], scaler: StandardScaler) -> list[tuple]:
             for date, X, y in cycles]
 
 
-# ── dataset / dataloader ──────────────────────────────────────────────────────
+# Load data
 
 class CycleDataset(Dataset):
     def __init__(self, cycles: list[tuple]):
@@ -244,10 +244,9 @@ def collate_fn(batch):
     return xs_pad, ys_pad, lengths
 
 
-# ── model ─────────────────────────────────────────────────────────────────────
 
 class BusDelayRNN(nn.Module):
-    """Two-layer LSTM with linear output head."""
+    """Two-layer LSTM with linear output head. 128 deep."""
 
     def __init__(self, input_size: int, hidden_dim: int):
         super().__init__()
@@ -267,8 +266,7 @@ class BusDelayRNN(nn.Module):
         return self.output(out_pad).squeeze(-1)   # (B, T_max)
 
 
-# ── training helpers ──────────────────────────────────────────────────────────
-
+# Mask MAE to prevent 0s dominating output, see paper data sections
 def masked_mae(preds, targets, lengths):
     total_loss = 0.0
     total_n = 0
@@ -307,6 +305,7 @@ def collect_preds(model, loader, device):
             all_targets.append(y[i, :L].cpu().numpy())
     return np.concatenate(all_preds), np.concatenate(all_targets)
 
+## Plotting scripts
 
 def plot_results(history, y_test, y_pred_test, out_dir: str):
     epochs = range(1, len(history["train_mae"]) + 1)
@@ -354,7 +353,7 @@ def plot_results(history, y_test, y_pred_test, out_dir: str):
     print(f"  Plots saved to {out_dir}/")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# Parse args, do training
 
 def main():
     parser = argparse.ArgumentParser()
@@ -374,30 +373,30 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice: {device}")
 
-    # ── load weather ──────────────────────────────────────────────────────────
+    # Weather (not active)
     print("\n[0/6] Loading weather …")
     weather = load_weather(args.weather)
     if weather is not None:
         print(f"  {len(weather):,} hourly weather records loaded.")
 
-    # ── load cycles ───────────────────────────────────────────────────────────
+    # Fetch cycle data
     print("\n[1/6] Loading data …")
     cycles = load_cycles(args.csv, max_cycles=args.max_cycles, weather=weather)
 
-    # ── split ────────────────────────────────────────────────────────────────
+    # Do splits
     print("\n[2/6] Splitting …")
     train_c5, val_c5, test_c5 = split_cycles(cycles)
     print(f"  Train: {len(train_c5):,} cycles  "
           f"Val: {len(val_c5):,}  Test: {len(test_c5):,}")
 
-    # ── persistence baseline: predict Δdelay = 0 (no change) ─────────────────
+    # Calculate persistence for baseline
     persist_targets = np.concatenate([c[2] for c in test_c5])
     persist_mae  = float(np.mean(np.abs(persist_targets)))
     persist_rmse = float(np.sqrt(np.mean(persist_targets ** 2)))
     print(f"\n  No-change baseline (test):  "
           f"MAE={persist_mae:.2f}s  RMSE={persist_rmse:.2f}s")
 
-    # ── stop/line mean encodings ──────────────────────────────────────────────
+    # Integrate derived features
     print("\n[3/6] Computing stop/line encodings …")
     stop_means, line_means, global_mean = compute_stop_line_means(train_c5)
     train_c = add_encoded_features(train_c5, stop_means, line_means, global_mean)
@@ -406,7 +405,7 @@ def main():
     k = train_c[0][1].shape[1]
     print(f"  Feature dim: {len(FEATURE_COLS)} base + 3 encoded = {k} total")
 
-    # ── normalize ────────────────────────────────────────────────────────────
+    # Normalize our data
     print("\n[4/6] Fitting scaler on train …")
     scaler  = fit_scaler(train_c)
     train_c = apply_scaler(train_c, scaler)
@@ -420,7 +419,7 @@ def main():
     test_loader  = DataLoader(CycleDataset(test_c),  batch_size=args.batch_size,
                               shuffle=False, collate_fn=collate_fn, num_workers=0)
 
-    # ── model ────────────────────────────────────────────────────────────────
+    # Perform training
     print("\n[5/6] Training …")
     model = BusDelayRNN(input_size=k, hidden_dim=args.hidden_dim).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -472,7 +471,7 @@ def main():
                       f"(no improvement for {args.patience} epochs).")
                 break
 
-    # ── final evaluation ─────────────────────────────────────────────────────
+    # Calculate evaluation metrics
     print("\n[6/6] Final evaluation (best checkpoint) …")
     model.load_state_dict(torch.load(ckpt_path, weights_only=True))
     train_mae, train_rmse = evaluate_v2(model, train_loader, device)

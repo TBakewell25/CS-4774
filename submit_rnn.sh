@@ -1,3 +1,5 @@
+# Generated SLURM script
+
 #!/bin/bash
 #SBATCH --job-name=train_rnn
 #SBATCH --output=logs/rnn_%j.out

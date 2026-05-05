@@ -2,10 +2,11 @@ import pandas as pd
 import sys
 
 
-# Time gap (in minutes) between consecutive pings that indicates a new cycle.
+# Time gap between consecutive pings for a new cycle.
 CYCLE_GAP_MINUTES = 30
 
 
+# Construct cycles using hierarchical sorting
 def main(input_path: str, output_path: str) -> None:
     df = pd.read_csv(input_path)
 
