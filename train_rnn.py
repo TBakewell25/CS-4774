@@ -1,25 +1,3 @@
-"""
-LSTM training for MTA bus delay prediction (proposal §6.5–6.8).
-
-Architecture:
-  - 2-layer LSTM with linear output head (scalar regression per stop)
-
-Target: CHANGE in delay from current stop to the next (Δdelay, seconds).
-  Positive = delay growing, negative = delay recovering.
-  Full prediction at inference: delay_s + predicted_Δdelay.
-
-Input: one sequence per route cycle, each step = one bus stop.
-  - Features: current delay, speed, time encodings, rush-hour, distance,
-              direction, hourly weather, stop/line mean-Δdelay encodings,
-              stop_idx_norm.
-  - Target: Δdelay at the *next* stop within the same cycle.
-
-Usage:
-  python train_rnn.py [--max-cycles N] [--hidden-dim H] [--lr LR]
-                      [--epochs E] [--batch-size B] [--out-dir DIR]
-                      [--weather PATH]
-"""
-
 import argparse
 import os
 import time
