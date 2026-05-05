@@ -2,9 +2,9 @@
 
 **Thomas Bakewell · Ethan Klose · David Onks IV** — CS 4774, University of Virginia
 
-Predicts next-stop bus delay (seconds) for NYC MTA buses using two models: a Random Forest baseline and a two-layer LSTM. Trained on the [MTA SIRI dataset](https://www.kaggle.com/datasets/stoney71/new-york-city-transport-statistics) (~26 M stop records across June, August, October, and December 2017).
+Predicts the **change in bus delay** (Δdelay, seconds) from one stop to the next for NYC MTA buses using a two-layer LSTM. Trained on the [MTA SIRI dataset](https://www.kaggle.com/datasets/stoney71/new-york-city-transport-statistics) (~26 M stop records across June, August, October, and December 2017).
 
-The best LSTM run achieved a test MAE of **153.74 s**, beating the no-change baseline (187.42 s) by 18%.
+The best run achieved a test MAE of **153.74 s**, beating the no-change baseline (187.42 s) by 18%.
 
 ---
 
@@ -14,12 +14,8 @@ The best LSTM run achieved a test MAE of **153.74 s**, beating the no-change bas
 .
 ├── sort_cycles.py        # Step 1 — sort raw CSVs into route cycles
 ├── engineer_features.py  # Step 2 — compute delay_s, speed, time encodings, lag features
-├── data_pipeline.py      # Trip reconstruction, temporal split, tensor builders
-├── rnn_model.py          # Two-layer LSTM + MAE trainer
-├── random_forest_model.py# RF baseline + random-search hyperparameter tuning
-├── train.py              # Unified CLI entry point (RNN, RF, or both)
-├── visualize.py          # Training curves and prediction plots
-├── run_slurm.sh          # SLURM job script
+├── train_rnn.py          # LSTM training script
+├── submit_rnn.sh         # SLURM job script
 └── requirements.txt
 ```
 
@@ -31,13 +27,9 @@ Raw data is not included in this repo. Download the four monthly CSVs from Kaggl
 
 ```
 data/
-  transit/        ← place raw CSVs here
-    mta_1706.csv
-    mta_1708.csv
-    mta_1710.csv
-    mta_1712.csv
+  transit/        ← place raw CSVs here (mta_1706.csv … mta_1712.csv)
   sorted/         ← produced by sort_cycles.py
-  parsed/         ← produced by engineer_features.py
+  parsed/         ← produced by engineer_features.py  (used for training)
 ```
 
 **Step 1 — sort into route cycles:**
@@ -48,10 +40,13 @@ python sort_cycles.py data/transit/mta_1706.csv data/sorted/mta_1706_sorted.csv
 
 **Step 2 — engineer features:**
 ```bash
+# Without weather:
 python engineer_features.py data/sorted/mta_1706_sorted.csv data/parsed/mta_1706_parsed.csv
-# optionally include weather (NYC_Weather_2016_2022.csv from Kaggle):
+
+# With weather (NYC_Weather_2016_2022.csv, also on Kaggle):
 python engineer_features.py data/sorted/mta_1706_sorted.csv data/parsed/mta_1706_parsed.csv data/NYC_Weather_2016_2022.csv
-# repeat for each month
+
+# Repeat for each month.
 ```
 
 ---
@@ -63,54 +58,48 @@ python engineer_features.py data/sorted/mta_1706_sorted.csv data/parsed/mta_1706
 pip install -r requirements.txt
 ```
 
-**Run locally (RNN only):**
+**Run locally:**
 ```bash
-python train.py --csv data/parsed/mta_1706_parsed.csv \
-                      data/parsed/mta_1708_parsed.csv \
-                      data/parsed/mta_1710_parsed.csv \
-                      data/parsed/mta_1712_parsed.csv \
-                --model rnn
-```
+python train_rnn.py --csv data/parsed/mta_1706_parsed.csv \
+                          data/parsed/mta_1708_parsed.csv \
+                          data/parsed/mta_1710_parsed.csv \
+                          data/parsed/mta_1712_parsed.csv
 
-**Run locally (both models):**
-```bash
-python train.py --csv data/parsed/*.csv --model both
-```
+# With weather:
+python train_rnn.py --csv data/parsed/*.csv --weather data/NYC_Weather_2016_2022.csv
 
-**Cache the processed trips to skip reloading on re-runs:**
-```bash
-python train.py --csv data/parsed/*.csv --cache-dir trips_cache --model rnn
+# Subsample for a quick test run:
+python train_rnn.py --csv data/parsed/*.csv --max-cycles 5000
 ```
 
 **On SLURM (GPU partition):**
 ```bash
-sbatch --export=ALL,DATA_DIR=/path/to/data/parsed run_slurm.sh
+# Required: DATA_DIR points to the folder of parsed CSVs.
+sbatch --export=ALL,DATA_DIR=/path/to/data/parsed submit_rnn.sh
 
-# Override hyperparameters:
-sbatch --export=ALL,DATA_DIR=/path/to/data/parsed,EPOCHS=50,HIDDEN=256 run_slurm.sh
+# With weather:
+sbatch --export=ALL,DATA_DIR=/path/to/data/parsed,WEATHER=/path/to/NYC_Weather_2016_2022.csv submit_rnn.sh
 ```
 
-### Key CLI flags
+### Key CLI flags (`train_rnn.py`)
 
 | Flag | Default | Description |
 |---|---|---|
-| `--csv` | required | Parsed CSV files |
-| `--model` | `both` | `rnn`, `rf`, or `both` |
-| `--hidden` | `128` | LSTM hidden size |
-| `--layers` | `2` | LSTM layers |
-| `--lr` | `1e-3` | Learning rate |
-| `--batch` | `64` | Batch size |
-| `--epochs` | `100` | Max epochs |
-| `--patience` | `10` | Early stopping patience |
-| `--rf-search` | `20` | RF random-search trials |
-| `--cache-dir` | none | Directory to cache processed trips |
-| `--output-dir` | `outputs` | Where to write results |
+| `--csv` | required | Parsed CSV files (one or more) |
+| `--weather` | none | Hourly weather CSV (optional) |
+| `--hidden-dim` | `64` | LSTM hidden state size |
+| `--lr` | `1e-3` | Adam learning rate |
+| `--epochs` | `20` | Max training epochs |
+| `--batch-size` | `64` | Batch size |
+| `--patience` | `5` | Early stopping patience |
+| `--max-cycles` | all | Subsample to N cycles (for testing) |
+| `--out-dir` | `.` | Where to write outputs |
 
 ---
 
 ## Features
 
-**LSTM** (10 features — no lag features; the LSTM learns temporal context directly):
+16 features total: 13 base + 3 encoded (computed from training data to avoid leakage).
 
 | Feature | Description |
 |---|---|
@@ -120,38 +109,49 @@ sbatch --export=ALL,DATA_DIR=/path/to/data/parsed,EPOCHS=50,HIDDEN=256 run_slurm
 | `day_sin`, `day_cos` | Cyclical day-of-week encoding |
 | `rush_hour` | Binary flag (08:00–09:00 or 17:00–18:00) |
 | `DistanceFromStop` | Distance to next stop (metres) |
+| `DirectionRef` | Route direction (encoded numerically) |
+| `temperature_c` | Hourly temperature °C (requires weather CSV) |
+| `precipitation_mm` | Hourly precipitation mm (requires weather CSV) |
+| `rain_mm` | Hourly rainfall mm (requires weather CSV) |
+| `windspeed_kmh` | Hourly wind speed km/h (requires weather CSV) |
+| `stop_mean_Δdelay` | Mean Δdelay for this stop (from training set) |
+| `line_mean_Δdelay` | Mean Δdelay for this bus line (from training set) |
 | `stop_idx_norm` | Normalised position in route (0 = first stop, 1 = last) |
-| `line_mean_delay` | Mean delay for this bus line (computed from training data) |
 
-**Random Forest** (12 features — adds lag features to emulate temporal context):
+Without weather, the four weather columns are zero-filled and the model trains on 12 effective features.
 
-Same as above minus `stop_idx_norm` and `line_mean_delay`, plus `delay_lag1–3` and `speed_lag1–3`.
+---
+
+## Target
+
+```
+Δdelay = clip(delay_s[k+1], ±30 min) − clip(delay_s[k], ±30 min)
+```
+
+Positive = delay growing, negative = delay recovering. The **no-change baseline** predicts Δdelay = 0 everywhere (i.e., delay stays constant stop-to-stop).
 
 ---
 
 ## Outputs
 
 ```
-outputs/<job-id>/
-  best_rnn.pt              # Best RNN checkpoint (lowest val MAE)
-  rnn_scaler.joblib        # Feature scaler (needed for inference)
-  rf_model.joblib          # Serialised Random Forest
-  rnn_training_curves.png  # Train/val MAE and RMSE per epoch
-  rnn_pred_vs_actual.png   # Predicted vs actual scatter plot
-  rnn_residuals.png        # Residual distribution
-  results.json             # Final test MAE/RMSE for each model
+<out-dir>/
+  rnn_best.pt           # Best checkpoint (lowest val MAE)
+  learning_curve.png    # Train/val MAE per epoch
+  pred_vs_actual.png    # Predicted vs actual scatter (test set)
+  residuals.png         # Residual distribution (test set)
+  y_test.npy            # Ground-truth Δdelay values
+  y_pred.npy            # Model predictions
 ```
 
 ---
 
 ## Results
 
-All results use a **temporal split**: first 2/3 of each month → train, next 1/6 → val, last 1/6 → test.
+Temporal split: first 2/3 of each month → train, next 1/6 → val, last 1/6 → test.
 
 | Model | Features | Test MAE | Test RMSE | vs. no-change baseline |
 |---|---|---|---|---|
 | No-change baseline | — | 187.42 s | 304.73 s | — |
-| Random Forest | 12 | 194.67 s* | 335.04 s* | −3.9% (worse) |
-| LSTM | 10 | **153.74 s** | **265.53 s** | **−18.0%** |
-
-\* RF val-set result from an incomplete run (timed out before test evaluation).
+| LSTM (no weather) | 12 | 163.83 s | 271.39 s | −12.6% |
+| LSTM (with weather) | 16 | **153.74 s** | **265.53 s** | **−18.0%** |
