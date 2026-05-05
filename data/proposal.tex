@@ -1,0 +1,268 @@
+\documentclass[sigconf]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+\usepackage{dirtree}
+\usepackage{soul}
+
+%% Remove ACM copyright/permission footnotes
+\setcopyright{none}
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\begin{document}
+
+\title{Optimizing Bus Schedules Using Regression Techniques}
+
+\author{Thomas Bakewell}
+\email{gxe5dg@virginia.edu}
+\affiliation{%
+  \institution{University of Virginia}
+}
+
+\author{Ethan Klose}
+\email{fwy4zk@virginia.edu}
+\affiliation{%
+  \institution{University of Virginia}
+}
+
+\author{David Onks IV}
+\email{xqe2db@virginia.edu}
+\affiliation{%
+  \institution{University of Virginia}
+}
+
+\maketitle
+\section{ABSTRACT}
+    Unreliable bus schedules present a significant challenge in urban transportation systems, resulting in inefficiencies and commuter dissatisfaction. In New York City, delays are not isolated events but propagate along routes, where early perturbations impact downstream performance throughout the day. This work formulates bus delay prediction as a temporal forecasting problem using large, time-stamped tracking data. We determine route cycles and engineer features from historical behavior, including lagged delay and approximate speed. We leverage the  machine learning approaches of random forest, and recurrent neural networks (RNNs), to model both nonlinear relationships and sequential dependencies. Results demonstrate that temporal features and latency propagation are the primary predictors of delay. These findings demonstrate the importance of modeling delay as a time-dependent process and provide useful discoveries for improving schedule reliability in large urban transit systems.
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{nyc_map.png}
+    \caption{MTA SIRI Stop Map}
+    \label{fig:placeholder}
+\end{figure}
+\section{Problem Statement}
+Unpredictable bus schedules have long been a source of dismay to both professionals and commuters alike. Many people around the world rely on public transport each day, and delays and poor performance can have significant effects, and in fact decrease economic output and productivity [1]. In New York City, high traffic density, varying demand, and operational constraints lead to delays that are not independent events but propagate throughout the entire system. Specifically, public buses that operate on closed-loop routes are temporally dependent, meaning delays accumulate and influence subsequent stops and trips over the course of a single day.\\
+Optimizing bus routes is a long standing area of interest in the fields of both data structures and algorithms and machine learning. Traditional approaches to transit analysis understand delays as independent events or depend on merely static historical averages. This fails to capture the dynamic and sequential nature of bus operations. This limits the ability to accurately predict delays and know how perturbations over time impact individual routes.\\
+This project aims to address these limitations by modeling bus delay as a temporal process, where latency propagates along closed-loop routes based on prior system state and contextual factors. We use historical transportation data and other features such as time and environmental conditions to develop machine learning models like regression, random forest, and recurrent neural networks (RNNs) to predict future delays.\\
+Over 1 million people ride the New York City bus sytem everyday \cite{MTA}, relying on it as their primary mode of transport. Inaccurate reporting of arrival times is disruptive to their daily commute and can after downwind economic effects. We hope that our modeling of bus latency could be a basis for providing riders with more accurate data to help them schedule their commutes more effectively, and could provide insight into how to optimize existing MTA routes and schedules.
+\section{Literature Review}
+
+Latency propagation in public transit systems remains a significant challenge for maintaining schedule reliability, particularly in closed-loop routes where delays can accumulate and affect subsequent stops within a single day. Traditional transit network design and scheduling literature has largely relied on deterministic or simulation-based approaches. Guihaire and Hao \cite{guihaire2008} provide a comprehensive review of transit network design, emphasizing the complexity of balancing route structure, frequency, and operational constraints. However, these approaches often treat delays as static phenomena and provide limited insight into dynamic, within-day propagation patterns.
+
+More recent data-driven methods attempt to address the variability of delay behavior. Basak et al. \cite{basak2019} developed a data-driven optimization framework that applies clustering techniques to group time periods with similar delay characteristics before optimizing schedules. Their results demonstrate that clustering-based preprocessing improves schedule performance, suggesting that grouping similar temporal patterns is useful for analyzing delay propagation within individual days.
+
+Regression-based approaches have also been widely used for modeling travel times and delays. Hawas \cite{hawas2013} introduced simulation-based regression models to estimate bus route travel times under varying conditions, demonstrating that temporal and route-level features are strong predictors of delay. Similarly, Berrebi et al. \cite{berrebi2021} applied regression techniques to transit data across multiple cities, showing that operational variables can capture day-to-day system dynamics. These works establish regression as a strong and interpretable baseline for delay prediction.
+
+Tree-based ensemble methods provide an alternative approach for capturing nonlinear relationships. Ding et al. \cite{ding2016} demonstrated the effectiveness of Gradient Boosting Decision Trees (GBDT) for short-term transit prediction, achieving high predictive accuracy while maintaining interpretability through feature importance analysis. This suggests that tree-based methods are well-suited for modeling complex interactions between temporal and operational variables.
+
+While these approaches provide strong foundations, they do not fully capture the sequential nature of delay propagation. Bus delays evolve over time, where earlier delays influence future system states. Recurrent Neural Networks (RNNs) are particularly well-suited for this setting, as they model temporal dependencies through sequential input data. By capturing how delay propagates across stops and route cycles within a day, RNNs provide a natural framework for modeling closed-loop transit systems.
+
+The New York City transportation dataset from Kaggle \cite{kaggle} enables empirical validation of these methods at scale. By integrating clustering-based preprocessing, regression baselines, tree-based models, and sequential RNN architectures, this study aims to provide a comprehensive framework for understanding and predicting delay propagation in urban transit systems.
+\begin{figure*}
+    \centering
+    \includegraphics[width=0.75\linewidth]{heatmap_august.png}
+    \caption{MTA Delay Table}
+    \label{fig:placeholder}
+\end{figure*}
+\section{Data Collection}
+Much data has been made publicly available through open data initiatives and third-party aggregations.  For this project we utilize the Metropolitan Transit Aurhority (MTA) Service Interface for Real Time Information (SIRI) dataset (\textbf{figure 1}). This dataset was selected due to its scale, structure, and relevance to modeling large urban transit systems. The dataset provides tabular records of transit-related metrics collected over extended periods of time. The data is very well labeled and uniformly collected. All information was remarkably easy to aggregate, and is equally easy to read and to understand.\\
+Included in the dataset are temporal and operational features such as timestamps, ridership statistics, and aggregated measures of transit activity across different regions and time intervals. The dataset includes time-stamped records of bus locations, route identifiers, and schedule adherence indicators. While it does not directly include passenger boarding or alighting data, it provides sufficient information to derive delay and movement patterns over time. 
+This data will be further processed to extract meaningful features, including temporal indicators (e.g., hour of day, day of week), demand patterns, and derived delay estimates. These features will be the foundation for modeling how transit latency changes over time and across routes, enabling the application of machine learning techniques for delay prediction.
+
+\section{Data and Feature Engineering}
+\subsection{Trip Reconstruction}
+In order to make predictions that are considerate of the many different individual bus routes we must aggregate the millions of individual sample points into organized sequences representing the movement of buses along their assigned routes. We will use the following heirarchy for the initial partition of our data:\\
+
+\dirtree{%
+.1 Line Name - \textit{Name of the bus line}.
+.2 Direction Ref - \textit{What direction is it headed?}.
+.3 Vehicle - \textit{What vehicle is it?}.
+.4 Date - \textit{What day is it?}.
+.5 Route Cycle - \textit{Which run is it on?}.
+.6 Timestamp - \textit{HH:MM:SS timestamp}.
+}
+Upon sorting our data we will have thousands of samples of individual bus route cycles on specific days, and the latency of each stop in the cycle.
+
+\subsection{Engineering Novel Features}
+When we have generated independent samples for bus route cycles we can then calculate additional features that might provide useful context for our models. As we have have both \textit{distance from the next station} and \textit{expected arrival} we can calculate the approximate average speed of the bus at stop \textit{k}:
+$$V_{k} = \frac{\textit{distance to next stop}}{\textit{(expected arrival) - (current time)}}$$
+With our data organized in a sequential manner we are also able to calculate the speed between the previous $\textit{n}^{th} $ previous stop as $S_{k-n}$.\\
+Similarly, we derive latency at stop $\textit{k}$:
+$$\delta_k = (\textit{expected arrival})_k - (\textit{actual arrival})_k$$
+Which can again be extrapolated to the $\textit{n}^{th}$ previous leg as $\delta_{k-n}$.\\
+The ability to include the previous \textit{n} values in our feature vector lets us flatten out our temporal route data into one dimensional feature sets.\\
+A small hurtle is ensuring that the model recognizes that times just before and after midnight are close. We encode periodic
+temporal features using sine and cosine transformations to preserve the cyclical continuity (e.g., 11 PM and 1 AM are close in time):
+
+\begin{itemize}
+    \item $hour\_sin = sin(2 * pi * hour / 24)$
+    \item $hour\_cos = cos(2 * pi * hour / 24)$
+    \item $day\_sin = sin(2 * pi * day\_of\_week / 7)$
+    \item $day\_cos = cos(2 * pi * day\_of\_week / 7)$
+\end{itemize}
+
+Data between the hours of 08:00-09:00 and 17:00-18:00 will be marked with a binary classification indicating rush hour.
+The result is feature vector $x_k \in R^d$ where \textit{d} is approximately 12, although this number grows when previous speeds and latencies are included with each data point, and experimentation is ongoing.
+
+\section{Algorithm}
+\subsection{Model Introduction}
+We intend to make use of two models in our exploration of the problem space: our extant random forest model, and a novel recurrent neural network (RNN). Our forest model will in implementation be a large collection of decision trees which we train, test, and validate on carefully chosen subsets of our data. Our hope is that through this process we will be able to gain insight into both the predictive strength of our feature set, and by extension the necessity for more data. The RNN is intended to be a potentially more robust approach to the regression problem, leveraging the power of deep learning to construct a model that is better at generalization.
+
+
+\subsection{Random Forest}
+A random forest model is an ensemble machine learning approach that extends the concept of a decision tree by aggregating the results of multiple such predictors to create a more robust prediction. We have elected to use a random forest for our baseline modeling both because of its "white-box" high interperability, and its resistance against overfitting that other comparably simple models suffer from. Our random forest regression model accepts hyperparamter \textit{n} which describes the number of decision trees it will build, and performance will be scored with both MAE and RMSE, with MAE being used for hyperparameter tuning (see later discussion of parameter tuning and error metrics).
+
+\subsection{Input Representation}
+A drawback of the random forest model relative to our proposed RNN is its inability to naturally represent data in sequence. The forest model receives vectorized feature inputs individually, as opposed to a time series which an RNN might be able to ingest. We therefore draw upon the previously mentioned techniques to build feature vectors that preserve as much context as possible. Let the input representation of our random forest be described as:
+$$\textbf{x}_k^{(RF)} = \{\delta_k, \delta_{k-1}, \ldots. \delta_{k-n}, V_k, V_{k-1}, \ldots, V_{k-n}, \textit{\ \ SIRI \  features}, \textit{rush-hour}\}$$
+Note the presence of "lagged delay" features for both the distance $\sigma$ and latency $\delta$. We hope the inclusion of prior feature values in each input emulates the context that an RNN would naturally have, ideally causing the performance of our models to be similar. 
+
+\subsection{Random Forest Training Procedure}
+Care will be taken to assure that the input data sets are descriptive, but specifically prevent data leakage. With strictly temporal data such as our route sets it is problematic to randomly sample to build our training sets, as two nearly identical data points from the same day and similar times could end up one in the training data and the other in the validation/test data. This would lead to poor generalization and deceptively high testing scores. Instead we will split data temporally along the following scheme: the first $\frac{2}{3}$ of each month will be training data, and the remaining $\frac{1}{3}$ will be split as evenly as possible between validation and test. In this way we prevent the aforementioned leakage issue, and are able to focus on building sets with points that are relevant to eachother.\\
+The random forest will for each input feature vector produce a real-valued prediction $\hat{y}$ for latency in seconds for the buses arrival at the next stop.
+For hyperparameter optimization we intend to implement a random search over the support for each value. We will target the following hyperparameters:
+\begin{itemize}
+    \item Number of estimators (trees)
+    \item Maximum depth
+\end{itemize}
+Values which are found to be optimal will be recorded and used for validation and testing.
+
+
+\subsection{Recurrent Neural Network}
+A recurrent neural network (RNN) is a variant of the traditional neural network architecture that emphasizes preserving the temporal and spatial aspects of sequential data. Instead of simply iteratively accepting data inputs it leverages training work from past data points to inform its calculations for the current data point. It passes previous information to the next training operation in the form of the hidden state which gives it the property of having "memory". This causes it to be a logical choice for the MTA SIRI data, which is best understood as a series of trends over sequential locations and times.
+
+\subsection{Input Representation}
+Input for the RNN will be similar to the random forest with the notable caveat that there is no need to include "lagged delay"
+features in our data. We anticipate the RNN will naturally learn these relationships, making their exclusion possible. This will reduce the complexity of the data processing pipeline. Now, model inputs will be $\textit{n} \times \textit{m} \times k$ dimensional tensors, where:
+\begin{itemize}
+    \item \textit{n} is batch size, the number of samples per batch (64)
+    \item \textit{m} is the number of stops in the largest sample (all smaller samples will be padded with 0s)
+    \item \textit{k} is the feature dimension
+\end{itemize}
+The padding process will necessitate attention to ensure that the zero input pads don't effect prediction scores.
+
+\subsection{Model Implementation}
+Our model will be implemented as a deep standard RNN with two layers of hidden state to learn heirarchical relationships and a linear function on the output to ensure we are producing regression values.\\
+Let the input to our model be defined as $x_t \in \mathbb{R}^n$, the feature vectors as previously described, and $h_t \in \mathbb{R}^p$ is the hidden state that is passed between RNN neurons where \textit{p} is our hidden dimension. Weights $w_1$ and $w_2$ are shared weights in the network that are applied to the input and the hidden state respectively. The hidden state can be expressed as follows:
+$$h_t = tanh(w_1x_t + w_2h_{t-1})$$
+The previous hidden state, $h_{t-1}$ can be expanded recursively until the initial state input, $h_0$, which we will initialize as an \textit{n}-dimensional zero vector.\\
+We have taken special care to make use of the hyperbolic tangent function as opposed to a more traditional sigmoid as to help combat the issue of exploding and disappearing gradients.\\
+The output of each of these hidden states, $W_o$, is passed to the following linear function to generate our predicted value $\hat{y} \in \mathbb{R}$, a prediction for the latency in seconds at the next stop.
+$$\hat{y} = W_oh_t + b$$
+
+\subsection{RNN Training Procedure}
+The RNN training pipeline includes three steps: the forward pass where in a training sample is ingested by the model, producing a regression output value, loss evaluation where we apply our error metrics to calculate scores, and back propogation where we will perform gradient descent to update the weight values.\\
+In the forward pass it will be necessary for each batch to determine which sample has the most observations (the most stops in a route), and pad all smaller routes to accommodate that. We will take care to mask away outputs that are skewed by these zero values.
+Optimization will be performed with MAE as a loss function for our predictions. We will perform gradient descent with learning rate $\alpha$ (a hyperparameter), and cease learning when either the model has converged, or changing the alpha does little to change performance. Our gradients for back propogation can be found via the chain rule:
+$$\frac{\partial L_t}{\partial W_o} = \frac{\partial L_t}{\partial \hat{y}_t} \cdot \frac{\partial \hat{y}_t}{W_o}$$
+where,
+\begin{align*}
+    \frac{\partial L_t}{\partial \hat{ y_t}} = sign(\hat{y_t} - y_t) \tag{MAE gradient}\\
+    \frac{\partial \hat{y}_t}{W_o} = h_t \tag{gradient of linear function}
+\end{align*}
+Therefore,
+\begin{align*}
+   \frac{\partial L_t}{\partial W_o} =  sign(\hat{y_t} - y_t) \cdot h_t
+\end{align*}
+For the shared weights $W_1$ and $W_2$, the gradient computation is more involved. Because the hidden state $h_t$ depends recursively on all previous hidden states, computing $\frac{\partial L_t}{\partial W_1}$ and $\frac{\partial L_t}{\partial W_2}$ requires applying the chain rule backward through the sequence. The sensitivity of the current hidden state to any earlier hidden state $h_j$ is:
+$$\frac{\partial h_t}{\partial h_j} = \prod_{k=j+1}^t (1-h_k^2) \cdot W_2$$
+
+Because each factor $(1-h_k^2)$ is bounded between 0 and 1, this product shrinks toward zero as the distance between stops \textit{t} and \textit{j} grows. This is the well-known vanishing gradient problem: the model's ability to learn from early stops in a trip diminishes for longer sequences. For our route lengths of 20-50 stops, this is a manageable limitation, though architectures such as LSTMs that address this through additive cell state updates could be explored in future work.
+
+\section{Evaluation}
+The scoring and evaluation of both our random forest and RNN will draw on two common regression error metrics: root mean squared error (RMSE), and mean absolute error (MAE). For our training data set of size \textit{N} MAE is calculated as:\\
+$$MAE = \frac{1}{N} \sum_{i \in N} |\hat{y}_i - y_i|$$
+Our RMSE is similarly calculated as:
+$$RMSE = \sqrt{\sum_{i\in N}\frac{(\hat{y}_i - y_i)^2}{N}}$$
+We can therefore express the simple optimization target for our hyperparameter tuning on model $H'$ as:
+$$argmin_\theta \ \big(RMSE (H'(\textbf{x}, \theta), \textbf{y}), MAE(H'(\textbf{x}, \theta), \textbf{y}) \big) $$
+The random forest implementation differs from the RNN in that there is no back-propogation, and therefore no room for gradient descent or more fine grain optimization techniques. We will rely primarily on hyperparamater tuning to find optimal values. Thus far our most optimal scores are: 
+
+\begin{table}[h]
+    \centering
+    \label{Random Forest Error}
+    \begin{tabular}{ccc}
+        \toprule
+        \textbf{Metric} & \textbf{Score} \\
+        \midrule
+        \textbf{MAE} & 329.65s  \\
+        \textbf{RMSE} & 515.36s  \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+These results, which are also expressed in \textbf{figure 3}, are underwhelming. We hope that improved data processing and larger model sizes will improve scores.\\
+For the RNN we will be continuously updating internal parameters via gradient descent as mentioned above. We anticipate this resulting in a more optimal search.
+
+\section{Timeline}
+The project will be completed before May 5th.
+\begin{itemize}
+    \item \st{Week 1-5:
+    Literature Review, Data Collection and Preprocessing, and Feature Engineering}
+    \item Week 6-7: Model Development and Scaling. Temporal Modeling with RNNs. \textbf{In progress}
+    \item Week 8-9: Evaluate Results. Compare performance with baselines. Analysis and Visualization \textbf{In progress}
+    \item Week 10: Final Evaluation and preparation of report.
+
+\end{itemize}
+
+%MAE:  329.65s
+%RMSE: 515.36s
+%R²:   0.0578
+
+\subsection{Progress}
+As of the submission of this report we have an existing implementation of our random forest, and are in parallel actively pursuing the creation of our RNN. Owing to the very large nature of our data set we have been working to access compute that is able to accommodate it. Our feature engineering is robust and exists as described in this paper, but has struggled to accommodate the 20+ GB of data at one time. We are working to make use of the CS-Server's SLURM system to conduct our training. We have made several smaller, but underwhelming runs with smaller subsets of the data, but are confident we can perform more in depth learning soon.\\
+The RNN is progressing, but as of yet has not been run on the formatted data. We hope to have a working RNN model in early April, leaving the back half of the month to perfect and tweak it, as well as generate visualizations, create the presentation, and produce useful insights.\\
+The specific next steps for our forest model are two things: properly implement the data processing as described above, and to perform hyperparameter tuning (when we have the available compute). These are already in advanced states, but they need to be perfected before the model is usable.\\
+We hope that the forest model will give us insight to the most predictive features, as this will inform our ongoing work on building the RNN. Ideally we will have the RNN running before the forest model is complete.
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{accuracy_plot.png}
+    \caption{Prediction with n\_estimators=20}
+    \label{fig:placeholder}
+\end{figure}
+\section{Expected Results}
+We hope to be able to produce strong numbers both from our random forest model and our RNN. This would entail not only obtaining low error scores, but also producing data that is useful and easily interpretable. Ideally we would, given novel inputs from SIRI, be able to produce latency predictions in much the same way that the MTA and many transit systems around the world do.\\
+Additionally, we hope to compare the RNN and the forest model and gain insight into which is better suited for the task, constituting a contribution to the field.
+
+\bibliographystyle{ACM-Reference-Format}
+%\bibliography{sample-base}
+
+\appendix
+
+\begin{thebibliography}{9}
+
+\bibitem{apta2023}
+American Public Transportation Association. 2023. Economic Impact of Public Transportation Investment. APTA Report.
+
+\bibitem{guihaire2008}
+Guihaire, V. and Hao, J.-K. 2008. Transit network design and scheduling: A global review. \textit{Transportation Research Part A: Policy and Practice}, 42(10), 1251--1273.
+
+\bibitem{MTA}
+Anon. Subway and bus ridership for 2024. Retrieved March 26, 2026 from https://www.mta.info/agency/new-york-city-transit/subway-bus-ridership-2024 
+
+\bibitem{basak2019}
+Basak, S., Sun, F., Sengupta, S., Dubey, A. 2019. Data-Driven Optimization of Public Transit Schedule.
+
+\bibitem{hawas2013}
+Hawas, Yaser E. 2013. Simulation-Based Regression Models to Estimate Bus Routes and Network Travel Times. \textit{Journal of Public Transportation}, 16(4), 107--130.
+
+\bibitem{berrebi2021}
+Berrebi, S. J., Joshi, S., and Watkins, K. E. 2021. On bus ridership and frequency. \textit{Transportation Research Part A: Policy and Practice}, 148, 140--154.
+
+\bibitem{ding2016}
+Ding, C., Wang, D., Ma, X., and Li, H. 2016. Predicting Short-Term Subway Ridership and Prioritizing Its Influential Factors Using Gradient Boosting Decision Trees. \textit{Sustainability}, 8(11), 1100.
+
+\bibitem{kaggle}
+Stoney71. New York City Transport Statistics Dataset. \textit{Kaggle}. \url{https://www.kaggle.com/datasets/stoney71/new-york-city-transport-statistics}
+
+\bibitem{sciencedirect2021}
+Author(s). 2021. Title. \textit{ScienceDirect}. \url{https://www.sciencedirect.com/science/article/pii/S0965856421000604}
+
+\bibitem{mdpi2016}
+Author(s). 2016. Title. \textit{Sustainability}. \url{https://www.mdpi.com/2071-1050/8/11/1100}
+
+\end{thebibliography}
+\end{document}

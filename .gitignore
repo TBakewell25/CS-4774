@@ -1,0 +1,31 @@
+# Data — download separately (see README)
+data/transit/
+data/sorted/
+data/parsed/
+data/*.csv
+data/*.zip
+data/weather*/
+
+# Model outputs
+outputs/
+results/
+logs/
+trips_cache*/
+
+# Artifacts
+*.pt
+*.joblib
+*.pkl
+*.npy
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Editor / OS
+.DS_Store
+*.swp
+.~lock.*
+.claude/
